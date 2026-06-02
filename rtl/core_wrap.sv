@@ -42,6 +42,11 @@ module core_wrap import croc_pkg::*; #() (
   input  logic rst_ni,
   input  logic test_enable_i,
 
+  // Watchdog-driven program reset.
+  // Active-high pulse we reset the core but the rest of
+  // the SoC is preserved.
+  input  logic program_reset_i,
+
   // Interrupts
   // irqs_i maps to RISC-V fast interrupts (IRQ 16..31); see header comment for remapping
   input logic [15:0] irqs_i,
@@ -103,6 +108,26 @@ module core_wrap import croc_pkg::*; #() (
     x_result     = '0;
   end
 
+  // Stretch the (typically short) program_reset_i pulse from the watchdog
+  // into a few-cycle reset for the core. The watchdog drives a multi-cycle
+  // pulse already, but we register it here once more so the core sees a
+  // clean falling edge and synchronous deassertion on its own clock.
+  // Only i_core.rst_ni is gated -- everything else in this wrapper stays on
+  // the SoC reset rst_ni so that wakeup logic / observers survive.
+  logic program_reset_stretched_q;
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (~rst_ni) begin
+      program_reset_stretched_q <= 1'b0;
+    end else begin
+      program_reset_stretched_q <= program_reset_i;
+    end
+  end
+  logic program_reset_stretched;
+  assign program_reset_stretched = program_reset_i | program_reset_stretched_q;
+
+  logic core_rst_ni;
+  assign core_rst_ni = rst_ni & ~program_reset_stretched;
+
 `ifdef TRACE_EXECUTION
   cve2_core_tracing #(
 `else
@@ -121,7 +146,7 @@ module core_wrap import croc_pkg::*; #() (
     .XInterface       ( 1'b0                )
   ) i_core (
     .clk_i,
-    .rst_ni,
+    .rst_ni           ( core_rst_ni      ),
     .test_en_i        ( test_enable_i    ),
     .hart_id_i        ( 32'd0            ),
     .boot_addr_i      ( boot_addr_masked ),

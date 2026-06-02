@@ -57,13 +57,20 @@ module croc_domain import croc_pkg::*; #(
   logic uart_irq;
   logic gpio_irq;
   logic idma_irq;
+  logic wdt_irq;
+  // Watchdog program-reset pulse (high-active), routed to the core wrapper.
+  logic wdt_program_reset;
   logic [15:0] interrupts;
   always_comb begin
     interrupts    = '0;
-    interrupts[0] = obi_timer_irq;
+    // cve2 fast-IRQs: lower index = higher priority. The watchdog
+    // stage-1 IRQ must pre-empt everything else, so it lands at [0] (IRQ 16).
+    // The previous timer interrupt has been moved down to [8] (IRQ 24).
+    interrupts[0] = wdt_irq;
     interrupts[1] = uart_irq;
     interrupts[2] = gpio_irq;
     interrupts[3] = idma_irq;
+    interrupts[8] = obi_timer_irq;
     interrupts[4+:NumExternalIrqs] = interrupts_i;
   end
 
@@ -185,6 +192,10 @@ module croc_domain import croc_pkg::*; #(
   sbr_obi_req_t idma_obi_cfg_req;
   sbr_obi_rsp_t idma_obi_cfg_rsp;
 
+  // Watchdog periph bus
+  sbr_obi_req_t wdt_obi_req;
+  sbr_obi_rsp_t wdt_obi_rsp;
+
   // CLINT bus
   sbr_obi_req_t clint_obi_req;
   sbr_obi_rsp_t clint_obi_rsp;
@@ -206,12 +217,14 @@ module croc_domain import croc_pkg::*; #(
   assign all_periph_obi_rsp[PeriphGpio]    = gpio_obi_rsp;
   assign timer_obi_req                     = all_periph_obi_req[PeriphTimer];
   assign all_periph_obi_rsp[PeriphTimer]   = timer_obi_rsp;
-  assign idma_obi_cfg_req                  = all_periph_obi_req[PeriphiDMA];
-  assign all_periph_obi_rsp[PeriphiDMA]    = idma_obi_cfg_rsp;
-  assign clint_obi_req                     = all_periph_obi_req[PeriphClint];
-  assign all_periph_obi_rsp[PeriphClint]   = clint_obi_rsp;
-  assign bootrom_obi_req                   = all_periph_obi_req[PeriphBootrom];
-  assign all_periph_obi_rsp[PeriphBootrom] = bootrom_obi_rsp;
+  assign idma_obi_cfg_req                   = all_periph_obi_req[PeriphiDMA];
+  assign all_periph_obi_rsp[PeriphiDMA]     = idma_obi_cfg_rsp;
+  assign wdt_obi_req                        = all_periph_obi_req[PeriphWatchdog];
+  assign all_periph_obi_rsp[PeriphWatchdog] = wdt_obi_rsp;
+  assign clint_obi_req                      = all_periph_obi_req[PeriphClint];
+  assign all_periph_obi_rsp[PeriphClint]    = clint_obi_rsp;
+  assign bootrom_obi_req                    = all_periph_obi_req[PeriphBootrom];
+  assign all_periph_obi_rsp[PeriphBootrom]  = bootrom_obi_rsp;
 
 
   // -----------------
@@ -221,7 +234,8 @@ module croc_domain import croc_pkg::*; #(
   ) i_core_wrap (
     .clk_i,
     .rst_ni,
-    .test_enable_i  ( testmode_i  ),
+    .test_enable_i   ( testmode_i  ),
+    .program_reset_i ( wdt_program_reset ),
 
     .irqs_i         ( interrupts         ),
     .timer_irq_i    ( clint_timer_irq    ),
@@ -639,6 +653,22 @@ module croc_domain import croc_pkg::*; #(
     .obi_rsp_o  ( timer_obi_rsp ),
     .expired_o  ( obi_timer_irq ),
     .overflow_o ()
+  );
+
+  // OBI watchdog (two-stage). Note: clocked on rst_ni; NEVER reset by
+  // the program_reset pulse it drives, so STATUS.wdt_reset is preserved
+  // across the core reset.
+  obi_watchdog #(
+    .RESET_PULSE_CYCLES (2),
+    .obi_req_t          ( sbr_obi_req_t ),
+    .obi_rsp_t          ( sbr_obi_rsp_t )
+  ) i_obi_watchdog (
+    .clk_i,
+    .rst_ni,
+    .obi_req_i       ( wdt_obi_req       ),
+    .obi_rsp_o       ( wdt_obi_rsp       ),
+    .irq_o           ( wdt_irq           ),
+    .program_reset_o ( wdt_program_reset )
   );
 
   // Bootrom

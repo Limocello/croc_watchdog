@@ -16,6 +16,7 @@
 #define GPIO_BASE_ADDR      0x03005000
 #define OBI_TIMER_BASE_ADDR 0x0300A000
 #define IDMA_BASE_ADDR      0x0300B000
+#define WATCHDOG_BASE_ADDR  0x0300C000
 #define USER_ROM_BASE_ADDR  0x20000000
 
 // Frequencies
@@ -29,10 +30,14 @@
 #define UART_BAUD           TB_BAUDRATE
 
 // Interrupts
+// Note: on the CVE2 core, fast-IRQ index = IRQ number, lower number = higher
+// priority. The watchdog stage-1 interrupt sits at IRQ 16 (priority above
+// everything else) and the OBI timer was moved out to IRQ 24.
 #define IRQ_SOFTWARE        3
 #define IRQ_TIMER           7
 #define IRQ_EXTERNAL        11
-#define IRQ_OBI_TIMER       16
+#define IRQ_WATCHDOG        16
 #define IRQ_UART            17
 #define IRQ_GPIO            18
 #define IRQ_IDMA            19
+#define IRQ_OBI_TIMER       24
