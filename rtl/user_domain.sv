@@ -1,3 +1,5 @@
+// FILE COPIED FROM EXERCISE 1
+
 // Copyright 2024 ETH Zurich and University of Bologna.
 // Solderpad Hardware License, Version 0.51, see LICENSE for details.
 // SPDX-License-Identifier: SHL-0.51
@@ -13,7 +15,7 @@ module user_domain import user_pkg::*; import croc_pkg::*; #(
   input  logic      ref_clk_i,
   input  logic      rst_ni,
   input  logic      testmode_i,
-
+  
   input  sbr_obi_req_t user_sbr_obi_req_i, // User Sbr (rsp_o), Croc Mgr (req_i)
   output sbr_obi_rsp_t user_sbr_obi_rsp_o,
 
@@ -21,10 +23,10 @@ module user_domain import user_pkg::*; import croc_pkg::*; #(
   input  mgr_obi_rsp_t user_mgr_obi_rsp_i,
 
   input  logic [      GpioCount-1:0] gpio_in_sync_i, // synchronized GPIO inputs
-  output logic [NumExternalIrqs-1:0] interrupts_o    // interrupts to core
+  output logic [NumExternalIrqs-1:0] interrupts_o // interrupts to core
 );
 
-  assign interrupts_o = '0;
+  assign interrupts_o = '0;  
 
 
   //////////////////////
@@ -42,24 +44,37 @@ module user_domain import user_pkg::*; import croc_pkg::*; #(
   // ----------------------------------------------------------------------------------------------
   // User Subordinate Buses
   // ----------------------------------------------------------------------------------------------
-
+  
   // collection of signals from the demultiplexer
   sbr_obi_req_t [NumDemuxSbr-1:0] all_user_sbr_obi_req;
   sbr_obi_rsp_t [NumDemuxSbr-1:0] all_user_sbr_obi_rsp;
 
+  // TODO 1: Declare the signals connecting user_popcount_acc and the OBI user demultiplexer
+  sbr_obi_req_t user_popcount_acc_obi_req;
+  sbr_obi_rsp_t user_popcount_acc_obi_rsp;
+
   // Error Subordinate Bus
   sbr_obi_req_t user_error_obi_req;
   sbr_obi_rsp_t user_error_obi_rsp;
+
+  // User ROM Bus
+  sbr_obi_req_t user_rom_obi_req;
+  sbr_obi_rsp_t user_rom_obi_rsp;
 
   // OBI bus to your design
   sbr_obi_req_t user_design_obi_req;
   sbr_obi_rsp_t user_design_obi_rsp;
 
   // Fanout into more readable signals
+  // TODO 3: Add the connections with your user_popcount_acc signals
   assign user_error_obi_req               = all_user_sbr_obi_req[UserError];
   assign all_user_sbr_obi_rsp[UserError]  = user_error_obi_rsp;
+  assign user_rom_obi_req                 = all_user_sbr_obi_req[UserRom];
+  assign all_user_sbr_obi_rsp[UserRom]    = user_rom_obi_rsp;
   assign user_design_obi_req              = all_user_sbr_obi_req[UserDesign];
   assign all_user_sbr_obi_rsp[UserDesign] = user_design_obi_rsp;
+  assign user_popcount_acc_obi_req        = all_user_sbr_obi_req[UserPopcount]; // task 3
+  assign all_user_sbr_obi_rsp[UserPopcount] = user_popcount_acc_obi_rsp;  // task 3
 
 
   //-----------------------------------------------------------------------------------------------
@@ -70,16 +85,16 @@ module user_domain import user_pkg::*; import croc_pkg::*; #(
 
   addr_decode #(
     .NoIndices ( NumDemuxSbr                    ),
-    .NoRules   ( $size(UserAddrMap)             ),
+    .NoRules   ( $size(user_addr_map)           ),
     .addr_t    ( logic[SbrObiCfg.DataWidth-1:0] ),
     .rule_t    ( addr_map_rule_t                ),
     .Napot     ( 1'b0                           )
   ) i_addr_decode_periphs (
     .addr_i           ( user_sbr_obi_req_i.a.addr ),
-    .addr_map_i       ( UserAddrMap               ),
+    .addr_map_i       ( user_addr_map             ),
     .idx_o            ( user_idx                  ),
-    .dec_valid_o      (),
-    .dec_error_o      (),
+    .dec_valid_o      ( ),
+    .dec_error_o      ( ),
     .en_default_idx_i ( 1'b1      ),
     .default_idx_i    ( UserError )
   );
@@ -107,9 +122,30 @@ module user_domain import user_pkg::*; import croc_pkg::*; #(
 // User Subordinates
 //-------------------------------------------------------------------------------------------------
 
-  ///////////////////////////////////
-  // Replace this with your Design //
-  ///////////////////////////////////
+  // User ROM
+  user_rom #(
+    .ObiCfg    ( SbrObiCfg     ),
+    .obi_req_t ( sbr_obi_req_t ),
+    .obi_rsp_t ( sbr_obi_rsp_t )
+  ) i_user_rom (
+    .clk_i,
+    .rst_ni,
+    .obi_req_i ( user_rom_obi_req ),
+    .obi_rsp_o ( user_rom_obi_rsp )
+  );
+
+  // TODO 4: Instantiate and connect the user_popcount_acc module
+  user_popcount_acc #(
+  .ObiCfg      ( SbrObiCfg     ),
+  .obi_req_t   ( sbr_obi_req_t ),
+  .obi_rsp_t   ( sbr_obi_rsp_t )
+  ) i_user_popcount (
+  .clk_i       (clk_i),
+  .rst_ni      (rst_ni),
+  .obi_req_i   ( user_popcount_acc_obi_req),
+  .obi_rsp_o   ( user_popcount_acc_obi_rsp)
+);
+
   obi_err_sbr #(
     .ObiCfg      ( SbrObiCfg     ),
     .obi_req_t   ( sbr_obi_req_t ),
