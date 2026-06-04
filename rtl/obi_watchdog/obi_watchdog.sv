@@ -34,6 +34,7 @@ module obi_watchdog #(
   logic        enable;
   logic        kick_pulse;
   logic [31:0] threshold;
+  logic        irpt_clear;
 
   // FSM <-> register file
   logic        stage2_sel;
@@ -57,6 +58,7 @@ module obi_watchdog #(
     .enable_o        ( enable        ),
     .kick_pulse_o    ( kick_pulse    ),
     .threshold_o     ( threshold     ),
+    .irpt_clear_o    ( irpt_clear    ),
 
     .stage2_sel_i    ( stage2_sel    ),
     .state_i         ( state         ),
@@ -83,6 +85,7 @@ module obi_watchdog #(
     .rst_ni,
     .enable_i        ( enable        ),
     .kick_i          ( kick_pulse    ),
+    .irpt_clear_i    ( irpt_clear    ),
     .reached_i       ( reached       ),
 
     .stage2_sel_o    ( stage2_sel    ),
