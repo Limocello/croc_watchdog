@@ -34,6 +34,7 @@ module wdt_reg #(
   output logic        enable_o,
   output logic        kick_pulse_o,
   output logic [31:0] threshold_o,
+  output logic        irpt_clear_o,
 
   // Mux/control inputs from the FSM
   input  logic        stage2_sel_i,
@@ -48,6 +49,7 @@ module wdt_reg #(
   localparam logic [4:0] WDT_THRESHOLD_1_OFFSET = 5'h08;
   localparam logic [4:0] WDT_THRESHOLD_2_OFFSET = 5'h0C;
   localparam logic [4:0] WDT_STATUS_OFFSET      = 5'h10;
+  localparam logic [4:0] WDT_IRPT_CLEAR_OFFSET  = 5'h14;
 
   // Internal address width (5 bits is enough for the offsets above).
   localparam int unsigned IntAddrWidth = 5;
@@ -76,6 +78,10 @@ module wdt_reg #(
   logic kick_pulse;
   assign kick_pulse_o = kick_pulse;
 
+  // forwarding irpt clear signal for fsm
+  logic irpt_clear;
+  assign irpt_clear_o = irpt_clear;
+
   // 2:1 threshold mux -- which threshold the FSM/timer is currently watching.
   assign threshold_o = stage2_sel_i ? thr2_q : thr1_q;
   assign enable_o    = enable_q;
@@ -101,6 +107,7 @@ module wdt_reg #(
     err_d      = 1'b0;
     rdata_d    = '0;
     kick_pulse = 1'b0;
+    irpt_clear = 1'b0;
 
     if (obi_req_i.req) begin
       if (obi_req_i.a.we) begin : write
@@ -136,6 +143,10 @@ module wdt_reg #(
               wdt_reset_d = 1'b0;
             end
           end
+          WDT_IRPT_CLEAR_OFFSET: begin
+            // Pulse out to the FSM. Value written is ignored.
+            irpt_clear = 1'b1;
+          end
           default: begin
             err_d = 1'b1;
           end
@@ -157,6 +168,10 @@ module wdt_reg #(
           end
           WDT_STATUS_OFFSET: begin
             rdata_d = {29'h0, wdt_reset_q, state_i};
+          end
+          WDT_IRPT_CLEAR_OFFSET: begin
+            // irpt clear reads back as zero (write-only register).
+            rdata_d = '0;
           end
           default: begin
             rdata_d = 32'hBADCAB1E;

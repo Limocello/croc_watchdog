@@ -24,6 +24,7 @@ module wdt_fsm #(
   // Control from the register file
   input  logic enable_i,
   input  logic kick_i,
+  input  logic irpt_clear_i,
   input  logic reached_i,
 
   // Outputs to the register file / pads
@@ -41,11 +42,12 @@ module wdt_fsm #(
   localparam int unsigned RESET_CNT_WIDTH = (RESET_PULSE_CYCLES <= 1) ? 1 :
                                             $clog2(RESET_PULSE_CYCLES + 1);
 
-  typedef enum logic [1:0] {
-    Idle   = 2'd0,
-    Stage1 = 2'd1,
-    Stage2 = 2'd2,
-    Reset  = 2'd3
+  typedef enum logic [2:0] {
+    Idle   = 3'd0,
+    Stage1 = 3'd1,
+    Stage2 = 3'd2,
+    Stage2_cleared = 3'd3,
+    Reset  = 3'd4
   } state_e;
 
   state_e state_d, state_q;
@@ -76,6 +78,19 @@ module wdt_fsm #(
       end
 
       Stage2: begin
+        if (!enable_i) begin
+          state_d = Idle;
+        end else if (kick_i) begin
+          state_d = Stage1;
+        end else if (reached_i) begin
+          state_d   = Reset;
+          rst_cnt_d = '0;
+        end else if (irpt_clear_i) begin
+          state_d = Stage2_cleared;
+        end
+      end
+
+      Stage2_cleared: begin
         if (!enable_i) begin
           state_d = Idle;
         end else if (kick_i) begin
@@ -135,6 +150,13 @@ module wdt_fsm #(
         // KICK from Stage2 goes back to Stage1; clear the counter for the
         // fresh Stage1 window. (The mux flips back combinationally once the
         // state register updates.)
+        if (kick_i) begin
+          clear_counter_o = 1'b1;
+        end
+      end
+
+      Stage2_cleared: begin
+        stage2_sel_o = 1'b1;
         if (kick_i) begin
           clear_counter_o = 1'b1;
         end
