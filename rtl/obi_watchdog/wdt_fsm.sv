@@ -9,8 +9,14 @@
 //             If reached_i fires before a kick we pulse irq_o, switch the
 //             threshold mux to THRESHOLD_2 and clear the counter, then move
 //             to Stage2.
-//   Stage2  : counter compared against THRESHOLD_2. A KICK returns to Stage1.
-//             If reached_i fires we move to Reset.
+//   Stage2  : counter compared against THRESHOLD_2, irq_o held high. A KICK
+//             returns to Stage1; reached_i moves to Reset. irpt_clear_i (the
+//             ISR acknowledging the interrupt) moves to Stage2_cleared.
+//   Stage2_cleared : same as Stage2 (still counting THRESHOLD_2 toward Reset,
+//             KICK still returns to Stage1) but irq_o is deasserted. This lets
+//             the ISR acknowledge and return without re-entering, while the
+//             reset deadline keeps running. The counter is NOT restarted on the
+//             Stage2->Stage2_cleared transition, so the ack does not extend it.
 //   Reset   : pulses program_reset_o for RESET_PULSE_CYCLES cycles, raises
 //             wdt_reset_o (latched in the register file), then returns to Idle
 //             with the enable bit cleared.
@@ -34,7 +40,7 @@ module wdt_fsm #(
   output logic       program_reset_o,    // multi-cycle pulse during Reset
   output logic       wdt_reset_set_o,    // latched STATUS.wdt_reset cause flag
   output logic       enable_clear_o,     // single-cycle pulse to clear CTRL.enable
-  output logic [1:0] state_o             // for STATUS.state[1:0] readback
+  output logic [2:0] state_o             // for STATUS.state[2:0] readback (5 states)
 );
 
   // We need ceil(log2(RESET_PULSE_CYCLES)) bits to count the pulse width.

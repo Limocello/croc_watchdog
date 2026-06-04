@@ -9,7 +9,9 @@
 //   0x04  CTRL         R/W  bit0 = enable, bit1 = write-once lock
 //   0x08  THRESHOLD_1  R/W  first-stage threshold
 //   0x0C  THRESHOLD_2  R/W  second-stage threshold
-//   0x10  STATUS       R/W  [1:0] FSM state (RO), bit2 = wdt_reset (W1C)
+//   0x10  STATUS       R/W  [2:0] FSM state (RO), bit3 = wdt_reset (W1C)
+//   0x14  IRPT_CLEAR   W    write-any-value to acknowledge the Stage1 IRQ
+//                           (moves Stage2 -> Stage2_cleared, deasserts irq_o)
 //
 // CTRL.lock is write-once: once set to 1 it cannot be cleared and CTRL,
 // THRESHOLD_1 and THRESHOLD_2 become read-only. KICK and STATUS.wdt_reset
@@ -38,7 +40,7 @@ module wdt_reg #(
 
   // Mux/control inputs from the FSM
   input  logic        stage2_sel_i,
-  input  logic [1:0]  state_i,
+  input  logic [2:0]  state_i,
   input  logic        wdt_reset_set_i,
   input  logic        enable_clear_i
 );
@@ -138,8 +140,8 @@ module wdt_reg #(
             end
           end
           WDT_STATUS_OFFSET: begin
-            // Bit2 is W1C for the wdt_reset cause flag. Bits [1:0] are RO.
-            if (obi_req_i.a.wdata[2] & be_mask[2]) begin
+            // Bit3 is W1C for the wdt_reset cause flag. Bits [2:0] are RO state.
+            if (obi_req_i.a.wdata[3] & be_mask[3]) begin
               wdt_reset_d = 1'b0;
             end
           end
@@ -167,7 +169,8 @@ module wdt_reg #(
             rdata_d = thr2_q;
           end
           WDT_STATUS_OFFSET: begin
-            rdata_d = {29'h0, wdt_reset_q, state_i};
+            // [2:0] = FSM state (RO), bit3 = wdt_reset cause flag (W1C)
+            rdata_d = {28'h0, wdt_reset_q, state_i};
           end
           WDT_IRPT_CLEAR_OFFSET: begin
             // irpt clear reads back as zero (write-only register).

@@ -38,7 +38,7 @@ module obi_watchdog #(
 
   // FSM <-> register file
   logic        stage2_sel;
-  logic [1:0]  state;
+  logic [2:0]  state;
   logic        wdt_reset_set;
   logic        enable_clear;
 

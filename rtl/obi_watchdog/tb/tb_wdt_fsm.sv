@@ -3,16 +3,18 @@
 // SPDX-License-Identifier: SHL-0.51
 //
 // Self-checking unit testbench for wdt_fsm.
-// Exercises every transition: Idle -> Stage1 -> Stage2 -> Reset, the kick
-// shortcuts, and the program_reset pulse width / cause-flag behaviour.
+// Exercises every transition: Idle -> Stage1 -> Stage2 -> Stage2_cleared ->
+// Reset, the kick shortcuts, the interrupt-acknowledge (irpt_clear) path, and
+// the program_reset pulse width / cause-flag behaviour.
 
 module tb_wdt_fsm;
 
-  // Mirror the RTL state encoding for readability.
-  localparam logic [1:0] IDLE   = 2'd0;
-  localparam logic [1:0] STAGE1 = 2'd1;
-  localparam logic [1:0] STAGE2 = 2'd2;
-  localparam logic [1:0] RESET  = 2'd3;
+  // Mirror the RTL state encoding for readability (3-bit, 5 states).
+  localparam logic [2:0] IDLE           = 3'd0;
+  localparam logic [2:0] STAGE1         = 3'd1;
+  localparam logic [2:0] STAGE2         = 3'd2;
+  localparam logic [2:0] STAGE2_CLEARED = 3'd3;
+  localparam logic [2:0] RESET          = 3'd4;
 
   localparam int unsigned RESET_PULSE_CYCLES = 2;
 
@@ -20,6 +22,7 @@ module tb_wdt_fsm;
   logic       rst_n;
   logic       enable;
   logic       kick;
+  logic       irpt_clear;
   logic       reached;
 
   logic       stage2_sel;
@@ -28,7 +31,7 @@ module tb_wdt_fsm;
   logic       program_reset;
   logic       wdt_reset_set;
   logic       enable_clear;
-  logic [1:0] state;
+  logic [2:0] state;
 
   int unsigned errors = 0;
   int unsigned prog_rst_cycles;
@@ -41,6 +44,7 @@ module tb_wdt_fsm;
     .rst_ni          ( rst_n         ),
     .enable_i        ( enable        ),
     .kick_i          ( kick          ),
+    .irpt_clear_i    ( irpt_clear    ),
     .reached_i       ( reached       ),
     .stage2_sel_o    ( stage2_sel    ),
     .clear_counter_o ( clear_counter ),
@@ -62,10 +66,11 @@ module tb_wdt_fsm;
   endtask
 
   initial begin
-    enable  = 1'b0;
-    kick    = 1'b0;
-    reached = 1'b0;
-    rst_n   = 1'b0;
+    enable     = 1'b0;
+    kick       = 1'b0;
+    irpt_clear = 1'b0;
+    reached    = 1'b0;
+    rst_n      = 1'b0;
     @(negedge clk);
     @(negedge clk);
     rst_n = 1'b1;
@@ -86,15 +91,15 @@ module tb_wdt_fsm;
     kick = 1'b0;
     check(state == STAGE1, "kick keeps us in Stage1");
 
-    // reached in Stage1 -> Stage2, with irq + clear on the transition
+    // reached in Stage1 -> Stage2, with irq asserted
     reached = 1'b1;
     @(negedge clk);  // FSM commits Stage1 -> Stage2 on this edge
     reached = 1'b0;
     check(state == STAGE2, "Stage1 -> Stage2 when threshold reached");
     check(stage2_sel == 1'b1, "threshold mux switches to THRESHOLD_2 in Stage2");
-    check(irq == 1'b1, "irq asserted while in Stage2");
+    check(irq == 1'b1, "irq asserted in Stage2");
 
-    // Kick in Stage2 -> back to Stage1 (and irq deasserts there)
+    // --- Kick directly from Stage2 -> back to Stage1, irq deasserts ---
     kick = 1'b1;
     @(negedge clk);
     kick = 1'b0;
@@ -102,13 +107,42 @@ module tb_wdt_fsm;
     check(irq == 1'b0, "irq deasserts back in Stage1");
     check(stage2_sel == 1'b0, "mux back to THRESHOLD_1 in Stage1");
 
-    // Drive all the way through: Stage1 -> Stage2 -> Reset (no kick)
+    // --- Interrupt-acknowledge path: Stage2 -> Stage2_cleared ---
     reached = 1'b1;
     @(negedge clk);             // -> Stage2
-    check(state == STAGE2, "back to Stage2 for the reset path");
-    // keep reached high; Stage2 should now progress to Reset
-    @(negedge clk);             // -> Reset
-    check(state == RESET, "Stage2 -> Reset when not kicked");
+    reached = 1'b0;
+    check(state == STAGE2, "back in Stage2");
+    check(irq == 1'b1, "irq high in Stage2 (pre-ack)");
+
+    irpt_clear = 1'b1;          // ISR acknowledges the interrupt
+    @(negedge clk);
+    irpt_clear = 1'b0;
+    check(state == STAGE2_CLEARED, "irpt_clear: Stage2 -> Stage2_cleared");
+    check(irq == 1'b0, "irq deasserts after ack (still counting to reset)");
+    check(stage2_sel == 1'b1, "mux still on THRESHOLD_2 in Stage2_cleared");
+
+    // --- Kick from Stage2_cleared -> back to Stage1 (recover after ack) ---
+    kick = 1'b1;
+    @(negedge clk);
+    kick = 1'b0;
+    check(state == STAGE1, "kick in Stage2_cleared returns to Stage1");
+    check(stage2_sel == 1'b0, "mux back to THRESHOLD_1 after recovery");
+
+    // --- Full path with ack then reset: Stage2 -> Stage2_cleared -> Reset ---
+    reached = 1'b1;
+    @(negedge clk);             // Stage1 -> Stage2
+    reached = 1'b0;
+    check(state == STAGE2, "Stage2 again for the ack+reset path");
+
+    irpt_clear = 1'b1;          // ack with reached low -> land in Stage2_cleared
+    @(negedge clk);
+    irpt_clear = 1'b0;
+    check(state == STAGE2_CLEARED, "ack -> Stage2_cleared (pre-reset)");
+    check(irq == 1'b0, "irq stays low in Stage2_cleared");
+
+    reached = 1'b1;             // now let the Stage-2 deadline expire
+    @(negedge clk);             // Stage2_cleared -> Reset
+    check(state == RESET, "Stage2_cleared -> Reset when not kicked");
     reached = 1'b0;
 
     // Count program_reset pulse width. program_reset is high during Reset.
@@ -120,12 +154,9 @@ module tb_wdt_fsm;
     check(prog_rst_cycles == RESET_PULSE_CYCLES,
           $sformatf("program_reset asserted for %0d cycles", RESET_PULSE_CYCLES));
 
-    // After Reset we must be back in Idle, and the FSM must have requested
-    // setting the cause flag and clearing the enable on the way out.
+    // After Reset we must be back in Idle, with the cause flag set and the
+    // enable cleared on the way out.
     check(state == IDLE, "Reset -> Idle after the pulse");
-
-    // wdt_reset_set / enable_clear are single-cycle pulses fired on the last
-    // Reset cycle; we sampled them via a separate monitor below.
     check(saw_wdt_reset_set, "wdt_reset_set pulsed during Reset");
     check(saw_enable_clear,  "enable_clear pulsed during Reset");
 

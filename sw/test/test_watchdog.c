@@ -18,16 +18,20 @@
 
 static volatile int      stage1_irq_count = 0;
 static volatile uint32_t last_irq_cause   = 0;
+static volatile int      isr_should_kick  = 1;  // 1 = recover, 0 = ack only
 
-// Stage-1 ISR. In a production system this would do whatever the watchdog is
-// guarding and then kick. Here we just count and kick, demonstrating the
-// Stage2 -> Stage1 round-trip without progressing to a reset.
+// Stage-1 ISR. Properly servicing the Stage-1 interrupt means *acknowledging*
+// it (watchdog_ack) so irq_o deasserts and we don't immediately re-enter --
+// CVE2 fast IRQs are level-sensitive, so without the ack a non-kicking ISR
+// would re-trap until reset. Whether we also kick (recover) is controlled by
+// isr_should_kick so the test can exercise both behaviours.
 void croc_interrupt_handler(uint32_t cause) {
     last_irq_cause = cause;
     switch (cause) {
         case IRQ_WATCHDOG:
             stage1_irq_count++;
-            watchdog_kick();
+            watchdog_ack();                       // clear the IRQ (Stage2 -> Stage2_cleared)
+            if (isr_should_kick) watchdog_kick(); // optionally recover (-> Stage1)
             break;
         default:
             set_interrupt_enable(0, cause);
@@ -97,6 +101,32 @@ int main(void) {
     CHECK_ASSERT(10, last_irq_cause == IRQ_WATCHDOG);
     CHECK_ASSERT(11, watchdog_get_state() != WATCHDOG_STATE_RESET);
     CHECK_ASSERT(12, watchdog_get_reset_cause() == 0);
+
+    // ----------------------------------------------------------------
+    // Step 3b: interrupt servicing via ACK (no kick). The ISR now acknowledges
+    // the Stage-1 IRQ (watchdog_ack -> Stage2_cleared, irq_o low) and returns
+    // WITHOUT kicking. This proves the ISR runs a BOUNDED number of times
+    // (exactly once) rather than re-entering forever on the level-sensitive
+    // line -- the whole point of the ack. We poll for Stage2_cleared, then kick
+    // to recover before the Stage-2 reset deadline.
+    // ----------------------------------------------------------------
+    isr_should_kick = 0;          // ISR will ack only, not kick
+    watchdog_kick();              // fresh Stage1
+    stage1_irq_count = 0;
+    int got_cleared = 0;
+    for (uint32_t g = 0; g < 100000u; g++) {
+        if (stage1_irq_count >= 1 &&
+            watchdog_get_state() == WATCHDOG_STATE_STAGE2_CLEARED) {
+            got_cleared = 1;
+            break;
+        }
+    }
+    int ack_irqs = stage1_irq_count;
+    watchdog_kick();              // recover before the Stage-2 reset deadline
+    CHECK_ASSERT(16, got_cleared == 1);   // ack moved the FSM to Stage2_cleared
+    CHECK_ASSERT(17, ack_irqs == 1);      // ISR fired exactly once (bounded re-entry)
+    CHECK_ASSERT(18, watchdog_get_state() == WATCHDOG_STATE_STAGE1); // kick recovered
+    isr_should_kick = 1;          // restore recover-on-IRQ behaviour
 
     // ----------------------------------------------------------------
     // Step 4: deactivate mid-run -> FSM returns to Idle, no further IRQs.
