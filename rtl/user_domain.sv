@@ -121,7 +121,7 @@ module user_domain import user_pkg::*; import croc_pkg::*; #(
 //-------------------------------------------------------------------------------------------------
 // User Subordinates
 //-------------------------------------------------------------------------------------------------
-
+  /*
   // User ROM
   user_rom #(
     .ObiCfg    ( SbrObiCfg     ),
@@ -145,7 +145,7 @@ module user_domain import user_pkg::*; import croc_pkg::*; #(
   .obi_req_i   ( user_popcount_acc_obi_req),
   .obi_rsp_o   ( user_popcount_acc_obi_rsp)
 );
-
+*/
   obi_err_sbr #(
     .ObiCfg      ( SbrObiCfg     ),
     .obi_req_t   ( sbr_obi_req_t ),

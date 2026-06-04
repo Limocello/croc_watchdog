@@ -81,3 +81,9 @@
 #yosys
 /yosys/out
 rtl/obi_watchdog/obj_dir/
+rtl/user_domain.sv
+dfii/cds/.scratch_clean_remove_empty
+simvectors/.scratch_clean_remove_empty
+.gitignore
+tetramax/pattern/.scratch_clean_remove_empty
+sourcecode/.scratch_clean_remove_empty
